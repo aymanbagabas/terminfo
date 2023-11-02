@@ -226,7 +226,7 @@ func processCaps(capsBuf []byte) ([]byte, error) {
 			buf.WriteString("\n")
 		}
 		fmt.Fprintf(buf, "// The %s [%s, %s] %s capability %s\n%s%s", name, row[0], row[1], typ, formatComment(row[7], prefix, suffix), name, isFirst)
-		*names = append(*names, row[0], row[1])
+		*names = append(*names, name, row[0], row[1])
 		n++
 	}
 	if err := s.Err(); err != nil {
@@ -251,10 +251,19 @@ func processCaps(capsBuf []byte) ([]byte, error) {
 	z := []string{"bool", "num", "string"}
 	for n, s := range [][]string{boolNames, numNames, stringNames} {
 		y := z[n]
-		f.WriteString(fmt.Sprintf("// %sCapNames are the %s term cap names.\n", y, y))
+		f.WriteString(fmt.Sprintf("// %sCapNames are the %s term cap names map.\n", y, y))
 		f.WriteString(fmt.Sprintf("var %sCapNames = [...]string{\n", y))
-		for i := 0; i < len(s); i += 2 {
-			f.WriteString(fmt.Sprintf(`"%s", "%s",`+"\n", s[i], s[i+1]))
+		for i := 0; i < len(s); i += 3 {
+			f.WriteString(fmt.Sprintf(`"%s", "%s",`+"\n", s[i+1], s[i+2]))
+		}
+		f.WriteString("}\n")
+	}
+	for n, s := range [][]string{boolNames, numNames, stringNames} {
+		y := z[n]
+		f.WriteString(fmt.Sprintf("// %sNameCaps are the %s term cap names map.\n", y, y))
+		f.WriteString(fmt.Sprintf("var %sNameCaps = map[string]int{\n", y))
+		for i := 0; i < len(s); i += 3 {
+			f.WriteString(fmt.Sprintf(`"%s": %s,`+"\n", s[i+2], s[i]))
 		}
 		f.WriteString("}\n")
 	}

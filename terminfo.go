@@ -50,6 +50,8 @@ type Terminfo struct {
 	File string
 	// Names are the provided cap names.
 	Names []string
+	// Uses are the used referenced terminfo entry names.
+	Uses []string
 	// Bools are the bool capabilities.
 	Bools map[int]bool
 	// BoolsM are the missing bool capabilities.
