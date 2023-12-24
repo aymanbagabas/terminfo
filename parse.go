@@ -44,17 +44,24 @@ func Parse(data []byte) ([]*Terminfo, error) {
 	extBoolIdx := 0
 	extNumIdx := 0
 	extStringIdx := 0
+	extBoolNameCaps := make(map[string]int)
+	extNumNameCaps := make(map[string]int)
+	extStringNameCaps := make(map[string]int)
+
 	addCap := func(typ string) {
 		switch typ {
 		case "bool":
 			name := buf.String()
-			cap, ok := boolNameCaps[name]
-			if !ok {
+			if cap, ok := boolNameCaps[name]; ok {
+				ti.Bools[cap] = true
+			} else if cap, ok := extBoolNameCaps[name]; ok {
+				ti.ExtBoolNames[cap] = []byte(name)
+				ti.ExtBools[cap] = true
+			} else {
+				extBoolNameCaps[name] = extBoolIdx
 				ti.ExtBoolNames[extBoolIdx] = []byte(name)
 				ti.ExtBools[extBoolIdx] = true
 				extBoolIdx++
-			} else {
-				ti.Bools[cap] = true
 			}
 		case "num":
 			value := buf.String()
@@ -69,13 +76,16 @@ func Parse(data []byte) ([]*Terminfo, error) {
 				log.Printf("Warn: invalid number: %q", value)
 			}
 
-			cap, ok := numNameCaps[capName]
-			if !ok {
+			if cap, ok := numNameCaps[capName]; ok {
+				ti.Nums[cap] = int(n)
+			} else if cap, ok := extNumNameCaps[capName]; ok {
+				ti.ExtNumNames[cap] = []byte(capName)
+				ti.ExtNums[cap] = int(n)
+			} else {
+				extNumNameCaps[capName] = extNumIdx
 				ti.ExtNumNames[extNumIdx] = []byte(capName)
 				ti.ExtNums[extNumIdx] = int(n)
 				extNumIdx++
-			} else {
-				ti.Nums[cap] = int(n)
 			}
 			capName = ""
 		case "str":
@@ -83,13 +93,16 @@ func Parse(data []byte) ([]*Terminfo, error) {
 			if capName == "use" {
 				ti.Uses = append(ti.Uses, value)
 			} else {
-				cap, ok := stringNameCaps[capName]
-				if !ok {
+				if cap, ok := stringNameCaps[capName]; ok {
+					ti.Strings[cap] = []byte(value)
+				} else if cap, ok := extStringNameCaps[capName]; ok {
+					ti.ExtStringNames[cap] = []byte(capName)
+					ti.ExtStrings[cap] = []byte(value)
+				} else {
+					extStringNameCaps[capName] = extStringIdx
 					ti.ExtStringNames[extStringIdx] = []byte(capName)
 					ti.ExtStrings[extStringIdx] = []byte(value)
 					extStringIdx++
-				} else {
-					ti.Strings[cap] = []byte(value)
 				}
 			}
 			capName = ""
@@ -217,80 +230,104 @@ func Parse(data []byte) ([]*Terminfo, error) {
 		}
 	}
 
+	// Append d the last terminfo
 	if ti != nil {
 		tis = append(tis, ti)
 	}
 
-	tim := NewTerminfos(tis)
+	// Resolve uses
 	for i, ti := range tis {
-		for _, use := range ti.Uses {
-			addUse(tim, ti, use)
+		if len(ti.Uses) == 0 {
+			continue
 		}
-		tis[i] = ti
+
+		for _, use := range ti.Uses {
+			resolveUses(tis, ti, use)
+			tis[i] = ti
+		}
 	}
 
 	return tis, nil
 }
 
-func addUse(tis Terminfos, ti *Terminfo, use string) {
-	// Resolve uses
-	uti := tis.Find(use)
-	if uti == nil {
+func findTerminfo(tis []*Terminfo, name string) *Terminfo {
+	for _, ti := range tis {
+		for _, n := range ti.Names {
+			if n == name {
+				return ti
+			}
+		}
+	}
+	return nil
+}
+
+func resolveUses(tis []*Terminfo, ti *Terminfo, use string) {
+	u := findTerminfo(tis, use)
+	if u == nil {
 		log.Printf("Warn: %q uses %q, but %q is not found", ti.Names[0], use, use)
 		return
 	}
 
-	for _, u := range uti.Uses {
-		addUse(tis, uti, u)
-		tis.Set(uti)
+	for _, uu := range u.Uses {
+		resolveUses(tis, ti, uu)
 	}
 
-	for k, v := range uti.Bools {
+	// XXX: We need to check if the caps already exist in the terminfo
+	// so we don't override them.
+
+	// Collect core caps
+	for k, v := range u.Bools {
 		if _, ok := ti.Bools[k]; !ok {
 			ti.Bools[k] = v
 		}
 	}
-	for k, v := range uti.ExtBoolNames {
-		if _, ok := ti.ExtBoolNames[k]; !ok {
-			ti.ExtBoolNames[k] = v
-		}
-	}
-	for k, v := range uti.ExtBools {
-		if _, ok := ti.ExtBools[k]; !ok {
-			ti.ExtBools[k] = v
-		}
-	}
-	for k, v := range uti.Nums {
+	for k, v := range u.Nums {
 		if _, ok := ti.Nums[k]; !ok {
 			ti.Nums[k] = v
 		}
 	}
-	for k, v := range uti.ExtNumNames {
-		if _, ok := ti.ExtNumNames[k]; !ok {
-			ti.ExtNumNames[k] = v
-		}
-	}
-	for k, v := range uti.ExtNums {
-		if _, ok := ti.ExtNums[k]; !ok {
-			ti.ExtNums[k] = v
-		}
-	}
-	for k, v := range uti.Strings {
+	for k, v := range u.Strings {
 		if _, ok := ti.Strings[k]; !ok {
 			ti.Strings[k] = v
 		}
 	}
-	for k, v := range uti.ExtStringNames {
+
+	// Collect extended caps
+	for k, v := range u.ExtBoolNames {
+		if _, ok := ti.ExtBoolNames[k]; !ok {
+			ti.ExtBoolNames[k] = v
+		}
+	}
+
+	for k, v := range u.ExtNumNames {
+		if _, ok := ti.ExtNumNames[k]; !ok {
+			ti.ExtNumNames[k] = v
+		}
+	}
+
+	for k, v := range u.ExtStringNames {
 		if _, ok := ti.ExtStringNames[k]; !ok {
 			ti.ExtStringNames[k] = v
 		}
 	}
-	for k, v := range uti.ExtStrings {
+
+	for k, v := range u.ExtBools {
+		if _, ok := ti.ExtBools[k]; !ok {
+			ti.ExtBools[k] = v
+		}
+	}
+
+	for k, v := range u.ExtNums {
+		if _, ok := ti.ExtNums[k]; !ok {
+			ti.ExtNums[k] = v
+		}
+	}
+
+	for k, v := range u.ExtStrings {
 		if _, ok := ti.ExtStrings[k]; !ok {
 			ti.ExtStrings[k] = v
 		}
 	}
-
 }
 
 const (
